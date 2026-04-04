@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mic, Camera, ChevronRight, FolderOpen, UserCog, FileText, Send, Phone, Mail, MessageSquare, LayoutDashboard, Search, Bell, CheckCircle2, ArrowRight, X, Eye, PenLine, Share2 } from "lucide-react";
+import { useStore } from "@/data/store";
+import { syndicContact } from "@/data/mockData";
 import BottomNav from "@/components/BottomNav";
 import {
   Dialog,
@@ -72,6 +74,7 @@ type ModalType = "open_existing" | "create" | "contact" | "update" | null;
 
 const VoiceAgent = () => {
   const navigate = useNavigate();
+  const store = useStore();
   const [turns, setTurns] = useState<AgentTurn[]>([]);
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [usedActions, setUsedActions] = useState<string[]>([]);
@@ -84,6 +87,8 @@ const VoiceAgent = () => {
   const [successScreen, setSuccessScreen] = useState<{ title: string; description: string; cta?: { label: string; action: () => void } } | null>(null);
   const chatRef = useRef<HTMLDivElement>(null);
   const [textInput, setTextInput] = useState("");
+  const [isAgentTyping, setIsAgentTyping] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (chatRef.current) {
@@ -110,8 +115,26 @@ const VoiceAgent = () => {
       text: conversationTree.agentText,
       question: conversationTree.question,
     };
-    setTurns([userTurn, agentTurn]);
+    // Show user message first, then typing indicator, then agent response
+    setTurns([userTurn]);
+    setIsAgentTyping(true);
     setSelections({});
+    setTimeout(() => {
+      setIsAgentTyping(false);
+      setTurns([userTurn, agentTurn]);
+    }, 1200);
+  };
+
+  // Helper: add user turn immediately, show typing, then add agent turn
+  const addWithTyping = (userTurn: AgentTurn, agentTurn: AgentTurn, cb?: () => void) => {
+    setTurns((prev) => [...prev, userTurn]);
+    setIsAgentTyping(true);
+    const delay = Math.min(1800, Math.max(700, (agentTurn.text?.length || 0) * 6));
+    setTimeout(() => {
+      setIsAgentTyping(false);
+      setTurns((prev) => [...prev, agentTurn]);
+      cb?.();
+    }, delay);
   };
 
   const handleChipSelect = (questionId: string, option: string) => {
@@ -143,10 +166,8 @@ const VoiceAgent = () => {
             { icon: FileText, label: "Créer un nouveau dossier", description: "Avec les informations pré-remplies", id: "create" },
           ],
         };
-        setTurns((prev) => [...prev, userTurn, agentTurn]);
-        setPhase("actions");
+        addWithTyping(userTurn, agentTurn, () => setPhase("actions"));
       } else {
-        // Modifier → restart
         setPhase("idle");
         setTurns([]);
         setSelections({});
@@ -159,8 +180,7 @@ const VoiceAgent = () => {
         recap: recapText,
         question: { id: "confirm", label: "Confirmation", options: ["Confirmer", "Modifier"] },
       };
-      setTurns((prev) => [...prev, userTurn, agentTurn]);
-      setPhase("recap");
+      addWithTyping(userTurn, agentTurn, () => setPhase("recap"));
     } else if (option === "Ouvrir le dossier") {
       const newUsed = [...usedActions, option];
       setUsedActions(newUsed);
@@ -168,8 +188,7 @@ const VoiceAgent = () => {
         role: "agent",
         text: node.agentText,
       };
-      setTurns((prev) => [...prev, userTurn, agentTurn]);
-      setTimeout(() => navigate("/dossiers/8"), 1000);
+      addWithTyping(userTurn, agentTurn, () => setTimeout(() => navigate("/dossiers/8"), 600));
     } else if (questionId === "action") {
       const newUsed = [...usedActions, option];
       setUsedActions(newUsed);
@@ -184,14 +203,14 @@ const VoiceAgent = () => {
           options: remainingOptions,
         } : undefined,
       };
-      setTurns((prev) => [...prev, userTurn, agentTurn]);
+      addWithTyping(userTurn, agentTurn);
     } else {
       const agentTurn: AgentTurn = {
         role: "agent",
         text: node.agentText,
         question: node.question,
       };
-      setTurns((prev) => [...prev, userTurn, agentTurn]);
+      addWithTyping(userTurn, agentTurn);
     }
   };
 
@@ -284,16 +303,43 @@ const VoiceAgent = () => {
     const building = selections["building"] || "";
     const area = selections["area"] || "";
     const issue = selections["issue"] || "";
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+    const shortDate = now.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+    const newId = store.addDossier({
+      name: `${area} ${building} — ${issue}`.trim() || "Nouveau dossier via agent",
+      status: "en_cours",
+      urgency: "normal",
+      responsible: "",
+      lastUpdate: dateStr,
+      createdAt: dateStr,
+      nextStep: "À assigner à un membre du CS",
+      lastAction: "Signalement via agent vocal",
+      createdViaAgent: true,
+      timeline: [
+        { date: shortDate, label: "Signalement via agent vocal", done: true },
+        ...(hasPhoto ? [{ date: shortDate, label: "Photo jointe", done: true }] : []),
+      ],
+      documents: hasPhoto ? [{ name: `Photo_agent_${shortDate}.jpg`, type: "Photos" }] : [],
+      prestataires: [],
+      syndicContact,
+    });
     setSuccessScreen({
       title: "Dossier créé",
-      description: `« ${area} ${building} — ${issue} »\n\nStatut : Nouveau\nPhoto jointe comme preuve\nRécapitulatif enregistré`,
-      cta: { label: "Voir le dossier", action: () => { setSuccessScreen(null); navigate("/dossiers/8", { state: { fromAgent: true } }); } },
+      description: `« ${area} ${building} — ${issue} »\n\nStatut : Nouveau\n${hasPhoto ? "Photo jointe comme preuve\n" : ""}Récapitulatif enregistré`,
+      cta: { label: "Voir le dossier", action: () => { setSuccessScreen(null); navigate(`/dossiers/${newId}`, { state: { fromAgent: true } }); } },
     });
   };
 
   const handleContactConfirm = () => {
     setActiveModal(null);
     const method = contactChoice === "call" ? "Appel" : contactChoice === "sms" ? "Message" : "Email";
+    // Actually trigger contact
+    if (contactChoice === "call") window.location.href = `tel:${syndicContact.phone}`;
+    else if (contactChoice === "sms") window.location.href = `sms:${syndicContact.phone}`;
+    else if (contactChoice === "email") window.location.href = `mailto:${syndicContact.email}?subject=${encodeURIComponent("[Copro] Signalement")}`;
+    // Add timeline event to dossier 8 (ascenseur C)
+    store.addTimelineEvent("8", `${method} envoyé au syndic via agent vocal`);
     setSuccessScreen({
       title: `${method} envoyé`,
       description: `${method} au syndic effectué.\nTrace ajoutée à l'historique du dossier.`,
@@ -314,6 +360,16 @@ const VoiceAgent = () => {
   const handleUpdateConfirm = () => {
     setActiveModal(null);
     const shared = shareToggle ? "publiée et partagée au conseil" : "enregistrée (non partagée)";
+    // Persist update to store
+    store.addPublishedUpdate({
+      dossierId: "8",
+      date: new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "short" }),
+      status: "En cours",
+      nextStep: "Relancer syndic + assurance",
+      comment: "Mise à jour via agent vocal",
+      pushSent: false,
+    });
+    store.addTimelineEvent("8", "Mise à jour publiée via agent vocal");
     setSuccessScreen({
       title: "Mise à jour publiée",
       description: `Mise à jour ${shared}.\nTrace ajoutée à l'historique du dossier.`,
@@ -341,6 +397,10 @@ const VoiceAgent = () => {
   };
 
   const handlePhotoPress = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = () => {
     setHasPhoto(true);
   };
 
@@ -358,15 +418,17 @@ const VoiceAgent = () => {
       {/* Header */}
       <div className="px-5 pt-5 pb-3 border-b border-border">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Mic className="h-[18px] w-[18px] text-primary" />
+          <div className="w-9 h-9 rounded-xl btn-gradient flex items-center justify-center">
+            <span className="text-primary-foreground text-[13px] font-bold" style={{ fontFamily: "'Outfit', sans-serif" }}>CS</span>
           </div>
           <div>
-            <h1 className="text-[16px] font-bold text-foreground">Assistant IA</h1>
+            <h1 className="text-[16px] font-bold text-foreground">Assistant Syndic</h1>
             <p className="text-[11px] text-muted-foreground">Votre gestionnaire de copropriété</p>
           </div>
         </div>
       </div>
+
+      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
 
       {/* Success screen overlay */}
       {successScreen && (
@@ -445,40 +507,47 @@ const VoiceAgent = () => {
 
               const isLast = i === turns.length - 1;
               return (
-                <div key={i} className="space-y-2">
+                <div key={i} className="space-y-2 animate-in fade-in slide-in-from-left-2 duration-300">
                   {turn.text && (
-                    <div className="bg-secondary border border-border rounded-2xl rounded-bl-md px-4 py-3 max-w-[90%]">
-                      <p className="text-[13px] text-foreground leading-relaxed whitespace-pre-line">
-                        {turn.text.split('\n').map((line, li) => {
-                          const boldLabels = ["Équipement", "Problème", "Dernier intervenant", "Impact", "Syndic"];
-                          const matchedLabel = boldLabels.find(l => line.startsWith(l + " :"));
-                          if (matchedLabel) {
-                            return <span key={li}>{li > 0 && '\n'}<strong>{matchedLabel}</strong>{line.slice(matchedLabel.length)}</span>;
-                          }
-                          return <span key={li}>{li > 0 && '\n'}{line}</span>;
-                        })}
-                      </p>
-                    </div>
-                  )}
-
-                  {isLast && turn.question && (
-                    <div className="pl-1">
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {turn.question.options.map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => handleChipSelect(turn.question!.id, opt)}
-                            className="px-3.5 py-2 rounded-full text-[12px] font-semibold border bg-card text-foreground border-border hover:border-primary hover:bg-primary/5 transition active:scale-[0.97]"
-                          >
-                            {opt}
-                          </button>
-                        ))}
+                    <div className="flex items-start gap-2">
+                      <div className="w-7 h-7 rounded-full btn-gradient flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-primary-foreground text-[9px] font-bold" style={{ fontFamily: "'Outfit', sans-serif" }}>CS</span>
+                      </div>
+                      <div className="bg-secondary border border-border rounded-2xl rounded-bl-md px-4 py-3 max-w-[85%]">
+                        <p className="text-[13px] text-foreground leading-relaxed whitespace-pre-line">
+                          {turn.text.split('\n').map((line, li) => {
+                            const boldLabels = ["Équipement", "Problème", "Dernier intervenant", "Impact", "Syndic"];
+                            const matchedLabel = boldLabels.find(l => line.startsWith(l + " :"));
+                            if (matchedLabel) {
+                              return <span key={li}>{li > 0 && '\n'}<strong>{matchedLabel}</strong>{line.slice(matchedLabel.length)}</span>;
+                            }
+                            return <span key={li}>{li > 0 && '\n'}{line}</span>;
+                          })}
+                        </p>
                       </div>
                     </div>
                   )}
 
+                  {isLast && turn.question && (
+                    <div className="space-y-1.5 mt-2 ml-9">
+                      {turn.question.options.map((opt) => (
+                        <button
+                          key={opt}
+                          onClick={() => handleChipSelect(turn.question!.id, opt)}
+                          className="w-full flex items-center gap-3 px-3.5 py-3 rounded-[12px] bg-card border border-border hover:border-primary/30 transition active:scale-[0.98] text-left"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <MessageSquare className="h-4 w-4 text-primary" />
+                          </div>
+                          <p className="flex-1 text-[13px] font-semibold text-foreground">{opt}</p>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground/40 flex-shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {isLast && turn.actions && (
-                    <div className="space-y-1.5 mt-1">
+                    <div className="space-y-1.5 mt-2 ml-9">
                       {turn.actions.map((action) => {
                         const Icon = action.icon;
                         return (
@@ -505,6 +574,22 @@ const VoiceAgent = () => {
                 </div>
               );
             })}
+
+            {/* Typing indicator */}
+            {isAgentTyping && (
+              <div className="flex items-start gap-2 animate-in fade-in duration-200">
+                <div className="w-7 h-7 rounded-full btn-gradient flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <span className="text-primary-foreground text-[9px] font-bold" style={{ fontFamily: "'Outfit', sans-serif" }}>CS</span>
+                </div>
+                <div className="bg-secondary border border-border rounded-2xl rounded-bl-md px-4 py-3">
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <div className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,86 +1,52 @@
 import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, FileText, Image, Mail, Sparkles, Share2, Paperclip, UserCog, ChevronDown, FileIcon, MessageCircle, Ellipsis, Link, Download, Bell, Send, X } from "lucide-react";
-import { dossiers, csMembers, statusLabels } from "@/data/mockData";
-import { getPublishedUpdates, addPublishedUpdate } from "@/data/updatesStore";
-import type { InternalNote } from "@/components/InternalNotes";
+import { ArrowLeft, FileText, Image, Mail, Sparkles, Share2, Paperclip, UserCog, ChevronDown, FileIcon, MessageCircle, Ellipsis, Link, Download, Bell, Send, X, Copy, Check, Trash2 } from "lucide-react";
+import { csMembers, statusLabels } from "@/data/mockData";
+import { useStore } from "@/data/store";
 import InternalNotes from "@/components/InternalNotes";
 import StatusBadge from "@/components/StatusBadge";
 import BottomNav from "@/components/BottomNav";
+import { toast } from "@/hooks/use-toast";
 
 const aiSummaries: Record<string, string> = {
   "1": "Fuite identifiée au parking B, 1 devis reçu sur 3 sollicités. 2 prestataires n'ont pas répondu malgré relance.",
   "2": "Le dossier est bloqué. La panne de l'ascenseur est causée par une carte mère défectueuse. Le devis de l'ascensoriste a été envoyé, mais la réparation n'a pas encore démarré.",
   "3": "3 devis reçus pour le ravalement, prêt pour vote AG. Aucun blocage identifié.",
   "5": "Nettoyage insatisfaisant, courrier de mise en demeure envoyé. Attente de réponse du prestataire.",
-  "7": "Voiture gênante signalée, aucun responsable assigné.",
+  "6": "Infiltration toiture signalée, pas encore assigné. Action requise.",
   "8": "La pièce de remplacement a été commandée auprès du fournisseur et devrait arriver le 23 mars. L'intervention du technicien sera planifiée dès réception.",
 };
 
-const nextSteps: Record<string, string> = {
+const nextStepsMap: Record<string, string> = {
   "1": "Solliciter un prestataire alternatif ou valider le devis reçu.",
   "2": "Relancer le syndic pour obtenir la validation du devis, ou contacter un ascensoriste alternatif.",
   "3": "Préparer le comparatif des 3 devis pour la prochaine AG.",
   "5": "Confirmer le rendez-vous de recadrage du 12 fév.",
-  "7": "Assigner un responsable et contacter le syndic.",
+  "6": "Assigner un responsable et planifier une inspection.",
   "8": "Confirmer la date d'intervention avec le technicien dès réception de la pièce.",
 };
 
 const docDescriptions: Record<string, string> = {
-  "Email de signalement initial": "Bonjour, l'ascenseur du bâtiment C est hors service depuis ce matin...",
-  "Bon de commande intervention": "Intervention demandée pour diagnostic et remise en service...",
-  "Devis ascensoriste": "Remplacement de la carte mère de commande...",
-  "Devis Plomberie Martin": "Réparation fuite parking niveau -1...",
-  "Photos dégâts": "Photos des dégâts constatés...",
-  "Email signalement initial": "Signalement de la fuite au parking B...",
-};
-
-const mockNotes: Record<string, InternalNote[]> = {
-  "1": [
-    { id: "n-1-1", author: "Mme. Laurent", role: "Conseil Syndical", timestamp: "5 fév. 11:00", message: "On a reçu 1 seul devis sur 3, il faut relancer les 2 autres.", type: "internal", replies: [] },
-    { id: "n-1-2", author: "Cabinet Durand", role: "Syndic", timestamp: "6 fév. 09:30", message: "Nous avons relancé Aqua Services et Express Plomberie. Retour attendu sous 48h.", type: "external", replies: [
-      { author: "Mme. Laurent", role: "Conseil Syndical", timestamp: "6 fév. 10:00", message: "Merci, tenez-nous informés." },
-    ] },
-    { id: "n-1-3", author: "M. Dupont", role: "Syndic", timestamp: "8 fév. 10:00", message: "Le prestataire Plomberie Martin confirme l'intervention du 14 fév.", type: "external", replies: [] },
-  ],
-  "2": [
-    { id: "n1", author: "Mme. Laurent", role: "Conseil Syndical", timestamp: "6 fév. 14:32", message: "Le syndic n'a pas répondu, je relance demain matin.", type: "internal", replies: [] },
-    { id: "n2", author: "M. Bernard", role: "Conseil Syndical", timestamp: "6 fév. 15:10", message: "J'ai retrouvé le rapport OTIS, je le joins au dossier.", type: "internal", replies: [
-      { author: "Mme. Laurent", role: "Conseil Syndical", timestamp: "6 fév. 15:25", message: "Parfait, merci ! Je l'ajoute aux documents." },
-    ] },
-    { id: "n-2-3", author: "M. Garcia", role: "Conseil Syndical", timestamp: "2 fév. 11:00", message: "Ascenseur bloqué avec un résident dedans pendant 30 min.", type: "internal", replies: [] },
-    { id: "n-2-ext1", author: "Cabinet Durand", role: "Syndic", timestamp: "3 fév. 14:00", message: "OTIS confirme que la pièce doit être commandée en Allemagne. Délai 3 semaines.", type: "external", replies: [
-      { author: "Mme. Laurent", role: "Conseil Syndical", timestamp: "3 fév. 15:00", message: "C'est beaucoup trop long. Y a-t-il une alternative ?" },
-      { author: "Cabinet Durand", role: "Syndic", timestamp: "3 fév. 16:30", message: "Malheureusement non, c'est la seule pièce compatible." },
-    ] },
-  ],
-  "3": [
-    { id: "n-3-1", author: "M. Bernard", role: "Conseil Syndical", timestamp: "4 fév. 16:45", message: "Les 3 devis sont reçus. On prépare le comparatif pour l'AG du 26 fév.", type: "internal", replies: [] },
-    { id: "n-3-2", author: "Mme. Petit", role: "Conseil Syndical", timestamp: "5 fév. 09:20", message: "Je propose qu'on ajoute un critère sur les délais de réalisation dans le comparatif.", type: "internal", replies: [
-      { author: "M. Bernard", role: "Conseil Syndical", timestamp: "5 fév. 10:00", message: "Bonne idée, je l'ajoute au tableau." },
-    ] },
-    { id: "n-3-ext1", author: "Cabinet Durand", role: "Syndic", timestamp: "28 jan. 10:00", message: "Le dernier devis (Bâti France) vient d'arriver, je vous le transfère.", type: "external", replies: [] },
-  ],
-  "5": [
-    { id: "n-5-ext1", author: "Cabinet Durand", role: "Syndic", timestamp: "3 fév. 11:00", message: "Le courrier de mise en demeure a été envoyé à Clean & Net.", type: "external", replies: [
-      { author: "Mme. Petit", role: "Conseil Syndical", timestamp: "3 fév. 12:00", message: "Bien noté. J'ai fixé un rdv de recadrage le 12 fév." },
-    ] },
-  ],
-  "7": [
-    { id: "n-7-1", author: "Système", role: "", timestamp: "11 fév. 08:12", message: "Nouveau dossier critique signalé automatiquement dans #Urgences-group.", type: "internal", replies: [] },
-  ],
-  "8": [
-    { id: "n-8-1", author: "Mme. Laurent", role: "Conseil Syndical", timestamp: "5 fév. 09:30", message: "J'ai envoyé le mail au syndic concernant la panne de l'ascenseur bât. C.", type: "internal", replies: [] },
-    { id: "n-8-ext1", author: "Mme. Laurent", role: "Conseil Syndical", timestamp: "5 fév. 11:00", message: "Nous constatons 4 pannes en 3 mois. Quelles mesures comptez-vous prendre ?", type: "external", replies: [
-      { author: "Cabinet Durand", role: "Syndic", timestamp: "7 fév. 09:00", message: "Nous avons contacté OTIS pour une expertise complète de l'installation." },
-    ] },
-  ],
+  "Rapport_diagnostic.pdf": "Rapport de diagnostic du technicien ascensoriste",
+  "Contrat_maintenance.pdf": "Contrat de maintenance ascenseur en vigueur",
+  "Photos_panne_batC.jpg": "Photos des pannes ascenseur bâtiment C",
+  "Historique_pannes_batC.pdf": "Historique complet des pannes depuis décembre 2025",
+  "Email_syndic_relance.eml": "Email de relance envoyé au syndic",
+  "Devis_Entreprise_A.pdf": "Devis BTP Rénov — 45 000 €",
+  "Devis_Entreprise_B.pdf": "Devis Façade Pro — 52 000 €",
+  "Devis_Entreprise_C.pdf": "Devis Bâti France — 48 500 €",
+  "Photos_facade.jpg": "Photos de l'état actuel de la façade",
+  "Photos_parties_communes.jpg": "Photos des parties communes — nettoyage insuffisant",
+  "Courrier_mise_en_demeure.pdf": "Courrier de mise en demeure au prestataire",
+  "Contrat_nettoyage.pdf": "Contrat de nettoyage en vigueur",
+  "Facture_electricien.pdf": "Facture intervention électricien — 320 €",
 };
 
 const DossierDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const dossier = dossiers.find((d) => d.id === id);
+  const store = useStore();
+  const dossier = store.dossiers.find((d) => d.id === id);
   const [assignee, setAssignee] = useState(dossier?.responsible || "");
   const [showAssignee, setShowAssignee] = useState(false);
   const [docsExpanded, setDocsExpanded] = useState(false);
@@ -89,6 +55,7 @@ const DossierDetail = () => {
   const [showPushModal, setShowPushModal] = useState(false);
   const [pushMessage, setPushMessage] = useState("");
   const [pushSent, setPushSent] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -99,6 +66,11 @@ const DossierDetail = () => {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Sync assignee with store changes
+  useEffect(() => {
+    if (dossier) setAssignee(dossier.responsible);
+  }, [dossier?.responsible]);
+
   if (!dossier) {
     return (
       <div className="bg-card flex items-center justify-center p-10">
@@ -108,10 +80,88 @@ const DossierDetail = () => {
   }
 
   const aiSummary = aiSummaries[dossier.id];
-  const nextStep = nextSteps[dossier.id] || dossier.nextStep;
-
-  // Show a single static "push sent" example at the end of the timeline
+  const nextStep = nextStepsMap[dossier.id] || dossier.nextStep;
+  const notes = store.getNotes(dossier.id);
   const fullTimeline = [...dossier.timeline];
+
+  // ── Actions ──
+  const handleShare = async () => {
+    setMenuOpen(false);
+    const shareData = {
+      title: dossier.name,
+      text: `${dossier.name}\nStatut: ${statusLabels[dossier.status]}\nProchaine étape: ${nextStep}`,
+      url: window.location.href,
+    };
+    if (navigator.share) {
+      try { await navigator.share(shareData); } catch {}
+    } else {
+      await navigator.clipboard.writeText(`${shareData.text}\n${shareData.url}`);
+      setLinkCopied(true);
+      toast({ title: "Lien copié", description: "Les informations du dossier ont été copiées dans le presse-papier." });
+      setTimeout(() => setLinkCopied(false), 2000);
+    }
+  };
+
+  const handleExportPDF = () => {
+    setMenuOpen(false);
+    // Generate a simple text export and trigger download
+    const content = `
+DOSSIER: ${dossier.name}
+Statut: ${statusLabels[dossier.status]}
+Urgence: ${dossier.urgency}
+Référent: ${dossier.responsible || "Non assigné"}
+Créé le: ${dossier.createdAt}
+Dernière mise à jour: ${dossier.lastUpdate}
+
+PROCHAINE ÉTAPE:
+${nextStep}
+
+${aiSummary ? `RÉSUMÉ IA:\n${aiSummary}\n` : ""}
+CHRONOLOGIE:
+${dossier.timeline.map((t) => `  ${t.done ? "✓" : "○"} ${t.date} — ${t.label}`).join("\n")}
+
+DOCUMENTS:
+${dossier.documents.map((d) => `  • ${d.name} (${d.type})`).join("\n") || "  Aucun document"}
+
+---
+Exporté depuis CoPro Pilot le ${new Date().toLocaleDateString("fr-FR")}
+    `.trim();
+
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `dossier-${dossier.id}-${dossier.name.replace(/\s+/g, "_")}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Export généré", description: "Le fichier a été téléchargé." });
+  };
+
+  const handleEmailExport = () => {
+    setMenuOpen(false);
+    const subject = encodeURIComponent(`[CoPro Pilot] ${dossier.name}`);
+    const body = encodeURIComponent(
+      `Bonjour,\n\nVoici le statut du dossier "${dossier.name}" :\n\n` +
+      `Statut : ${statusLabels[dossier.status]}\n` +
+      `Prochaine étape : ${nextStep}\n` +
+      `Référent : ${dossier.responsible || "Non assigné"}\n\n` +
+      (aiSummary ? `Résumé : ${aiSummary}\n\n` : "") +
+      `Cordialement,\nConseil Syndical`
+    );
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  };
+
+  const handleAssign = (member: string) => {
+    setAssignee(member);
+    setShowAssignee(false);
+    store.assignDossier(dossier.id, member);
+    if (member) {
+      store.addTimelineEvent(dossier.id, `Référent modifié → ${member}`);
+      toast({ title: "Référent mis à jour", description: `${member} est maintenant référent du dossier.` });
+    } else {
+      toast({ title: "Référent retiré" });
+    }
+  };
 
   return (
     <div className="bg-card flex flex-col" style={{ minHeight: "calc(812px - 54px)" }}>
@@ -126,29 +176,52 @@ const DossierDetail = () => {
               <ArrowLeft className="h-5 w-5" />
               Retour
             </button>
-            <div className="relative" ref={menuRef}>
+            <div className="flex items-center gap-2">
+              {/* CTA Mise à jour statut */}
               <button
-                onClick={() => setMenuOpen(!menuOpen)}
-                className="h-9 w-9 rounded-full bg-secondary border border-border flex items-center justify-center hover:border-primary/30 transition active:scale-95"
+                onClick={() => navigate(`/dossiers/${dossier.id}/update`)}
+                className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-[11px] font-semibold hover:opacity-90 transition active:scale-95"
               >
-                <Ellipsis className="h-4 w-4 text-foreground" />
+                Mettre à jour
               </button>
-              {menuOpen && (
-                <div className="absolute right-0 top-11 z-50 bg-card border border-border rounded-xl shadow-lg py-1.5 min-w-[200px]">
-                  <button onClick={() => { setMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] text-foreground hover:bg-accent transition">
-                    <Link className="h-4 w-4 text-muted-foreground" />
-                    Partager la fiche
-                  </button>
-                  <button onClick={() => { setMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] text-foreground hover:bg-accent transition">
-                    <Download className="h-4 w-4 text-muted-foreground" />
-                    Exporter en PDF
-                  </button>
-                  <button onClick={() => { setMenuOpen(false); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] text-foreground hover:bg-accent transition">
-                    <Mail className="h-4 w-4 text-muted-foreground" />
-                    Envoyer par mail
-                  </button>
-                </div>
-              )}
+              <div className="relative" ref={menuRef}>
+                <button
+                  onClick={() => setMenuOpen(!menuOpen)}
+                  className="h-9 w-9 rounded-full bg-secondary border border-border flex items-center justify-center hover:border-primary/30 transition active:scale-95"
+                >
+                  <Ellipsis className="h-4 w-4 text-foreground" />
+                </button>
+                {menuOpen && (
+                  <div className="absolute right-0 top-11 z-50 bg-card border border-border rounded-xl shadow-lg py-1.5 min-w-[200px]">
+                    <button onClick={handleShare} className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] text-foreground hover:bg-accent transition">
+                      {linkCopied ? <Check className="h-4 w-4 text-green-500" /> : <Link className="h-4 w-4 text-muted-foreground" />}
+                      Partager la fiche
+                    </button>
+                    <button onClick={handleExportPDF} className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] text-foreground hover:bg-accent transition">
+                      <Download className="h-4 w-4 text-muted-foreground" />
+                      Exporter en fichier
+                    </button>
+                    <button onClick={handleEmailExport} className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] text-foreground hover:bg-accent transition">
+                      <Mail className="h-4 w-4 text-muted-foreground" />
+                      Envoyer par mail
+                    </button>
+                    <div className="mx-3 my-1 border-t border-border" />
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        if (confirm(`Supprimer le dossier "${dossier.name}" ? Cette action est irréversible.`)) {
+                          store.deleteDossier(dossier.id);
+                          navigate("/dossiers");
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-[14px] text-destructive hover:bg-destructive/10 transition"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Supprimer le dossier
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-3 mb-1">
@@ -199,7 +272,7 @@ const DossierDetail = () => {
               {csMembers.map((member) => (
                 <button
                   key={member}
-                  onClick={() => { setAssignee(member); setShowAssignee(false); }}
+                  onClick={() => handleAssign(member)}
                   className={`text-left text-[13px] px-3 py-2 rounded-lg transition ${
                     assignee === member
                       ? "bg-primary/10 text-primary font-semibold"
@@ -210,7 +283,7 @@ const DossierDetail = () => {
                 </button>
               ))}
               <button
-                onClick={() => { setAssignee(""); setShowAssignee(false); }}
+                onClick={() => handleAssign("")}
                 className="text-left text-[13px] px-3 py-2 rounded-lg text-destructive hover:bg-destructive/10 transition"
               >
                 Retirer le référent
@@ -223,8 +296,8 @@ const DossierDetail = () => {
         <button
           onClick={() => {
             const defaultMessages: Record<string, string> = {
-              "8": "Le réparateur a été contacté, l'intervention est prévue. Utilisez les escaliers s'il vous plaît 🙏.",
-              "2": "Le réparateur a été contacté, l'intervention est prévue. Utilisez les escaliers s'il vous plaît 🙏.",
+              "8": "Le réparateur a été contacté, l'intervention est prévue. Utilisez les escaliers s'il vous plaît.",
+              "2": "Le réparateur a été contacté, l'intervention est prévue. Utilisez les escaliers s'il vous plaît.",
             };
             setPushMessage(defaultMessages[dossier.id] || `${dossier.name} : mise à jour importante. Veuillez consulter l'application pour plus de détails.`);
             setShowPushModal(true);
@@ -274,7 +347,7 @@ const DossierDetail = () => {
         </section>
 
         {/* Notes internes */}
-        <InternalNotes dossierId={dossier.id} initialNotes={mockNotes[dossier.id] || []} />
+        <InternalNotes dossierId={dossier.id} initialNotes={notes} />
 
         {/* Documents (collapsible) */}
         <section className="bg-card rounded-[14px] border border-border shadow-sm mb-3.5">
@@ -291,18 +364,23 @@ const DossierDetail = () => {
           </button>
           {docsExpanded && (
             <div className="px-[18px] pb-[18px] space-y-2">
-              {dossier.documents.map((doc, i) => {
-                const desc = docDescriptions[doc.name] || "";
-                return (
-                  <div key={i} className="rounded-[10px] border border-border p-3 flex items-start gap-3">
-                    <Paperclip className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-[13px] font-semibold text-foreground">{doc.name}</p>
-                      {desc && <p className="text-[12px] text-muted-foreground mt-0.5">{desc}</p>}
+              {dossier.documents.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground italic py-2">Aucun document associé.</p>
+              ) : (
+                dossier.documents.map((doc, i) => {
+                  const desc = docDescriptions[doc.name] || "";
+                  return (
+                    <div key={i} className="rounded-[10px] border border-border p-3 flex items-start gap-3">
+                      <Paperclip className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-[13px] font-semibold text-foreground">{doc.name}</p>
+                        {desc && <p className="text-[12px] text-muted-foreground mt-0.5">{desc}</p>}
+                        <span className="text-[10px] text-primary font-medium">{doc.type}</span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           )}
         </section>
@@ -341,16 +419,16 @@ const DossierDetail = () => {
             <div className="space-y-2.5">
               <button
                 onClick={() => {
-                  const now = new Date();
-                  const dateStr = now.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
-                  addPublishedUpdate({
+                  store.addPublishedUpdate({
                     dossierId: dossier.id,
-                    date: dateStr,
+                    date: new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "short" }),
                     status: statusLabels[dossier.status],
                     nextStep,
                     pushSent: true,
                   });
+                  store.addTimelineEvent(dossier.id, "Notification push envoyée aux copropriétaires");
                   setShowPushModal(false);
+                  setPushSent(true);
                   navigate("/push-simulation", {
                     state: {
                       notificationTitle: dossier.name,
