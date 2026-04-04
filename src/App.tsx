@@ -53,7 +53,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter basename="/jhgu">
         <PhoneFrame>
           <Routes>
             <Route path="/" element={<Navigate to="/login" replace />} />
